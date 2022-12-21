@@ -760,7 +760,7 @@ pub const Block = struct {
         return ExtendedAssembly{ .amb = asm_ptr orelse return error.AddExtendedAssembly };
     }
 
-    pub fn end_with_extended_assembly_goto(self: *Self, location: Location, assembly_template: [:0]const u8, goto_blocks: []align(8) Self, fallthrough_block: Self) ExtendedAssembly {
+    pub fn end_with_extended_assembly_goto(self: *Self, location: Location, assembly_template: [:0]const u8, goto_blocks: []align(8) Self, fallthrough_block: Self) !ExtendedAssembly {
         comptime assert(@hasDecl(c, "LIBGCCJIT_HAVE_ASM_STATEMENTS"));
 
         //TODO: check if this works, but it should
@@ -768,7 +768,7 @@ pub const Block = struct {
         const goto_blocks_ptr = @ptrCast([*c]?*c.gcc_jit_block, goto_blocks.ptr);
 
         const asm_ptr = c.gcc_jit_block_end_with_extended_asm_goto(self.blk, location.loc, assembly_template, num_goto_blocks, goto_blocks_ptr, fallthrough_block.blk);
-        return ExtendedAssembly{ .amb = asm_ptr.? };
+        return ExtendedAssembly{ .amb = asm_ptr orelse return error.EndWithExtendedAssembly };
     }
 };
 
@@ -783,29 +783,29 @@ pub const RValue = packed struct {
 
     const Self = @This();
 
-    pub fn as_object(self: *Self) Object {
+    pub fn as_object(self: *Self) !Object {
         const obj_ptr = c.gcc_jit_rvalue_as_object(self.rva);
-        return Object{ .obj = obj_ptr.? };
+        return Object{ .obj = obj_ptr orelse return error.RValueAsObject };
     }
 
-    pub fn get_type(self: *Self) Type {
+    pub fn get_type(self: *Self) !Type {
         const type_ptr = c.gcc_jit_rvalue_get_type(self.rva);
-        return Type{ .typ = type_ptr.? };
+        return Type{ .typ = type_ptr orelse return error.GetType };
     }
 
-    pub fn access_field(self: *Self, location: Location, field: Field) RValue {
+    pub fn access_field(self: *Self, location: Location, field: Field) !RValue {
         const rva_ptr = c.gcc_jit_rvalue_access_field(self.rva, location.loc, field.fie);
-        return RValue{ .rva = rva_ptr.? };
+        return RValue{ .rva = rva_ptr orelse return error.AccessField };
     }
 
-    pub fn dereference_field(self: *Self, location: Location, field: Field) LValue {
+    pub fn dereference_field(self: *Self, location: Location, field: Field) !LValue {
         const lva_ptr = c.gcc_jit_rvalue_dereference_field(self.rva, location.loc, field.fie);
-        return LValue{ .lva = lva_ptr.? };
+        return LValue{ .lva = lva_ptr orelse return error.DereferenceField };
     }
 
-    pub fn dereference(self: *Self, location: Location) LValue {
+    pub fn dereference(self: *Self, location: Location) !LValue {
         const lva_ptr = c.gcc_jit_rvalue_dereference(self.rva, location.loc);
-        return LValue{ .lva = lva_ptr.? };
+        return LValue{ .lva = lva_ptr orelse return error.Dereference };
     }
 
     pub fn set_require_tail_call(self: *Self, require_tail_call: bool) void {
@@ -821,26 +821,24 @@ pub const LValue = struct {
 
     pub fn set_initializer_rvalue(self: *Self, init_value: RValue) !void {
         comptime assert(@hasDecl(c, "LIBGCCJIT_HAVE_CTORS"));
-        if (c.gcc_jit_global_set_initializer_rvalue(self.lva, init_value.rva)) |_| {
-            return;
-        } else return error.SetInitilializerRValue;
+        _ = c.gcc_jit_global_set_initializer_rvalue(self.lva, init_value.rva) orelse return error.SetInitilializerRValue;
+        return;
     }
 
     pub fn set_initializer(self: *Self, blob: *anyopaque, number_of_bytes: usize) !void {
         comptime assert(@hasDecl(c, "LIBGCCJIT_HAVE_gcc_jit_global_set_initializer"));
-        if (c.gcc_jit_global_set_initializer(self.lva, blob, number_of_bytes)) |_| {
-            return;
-        } else return error.SetInitilializer;
+        _ = c.gcc_jit_global_set_initializer(self.lva, blob, number_of_bytes) orelse return error.SetInitilializer;
+        return;
     }
 
-    pub fn as_object(self: *Self) Object {
+    pub fn as_object(self: *Self) !Object {
         const obj_ptr = c.gcc_jit_lvalue_as_object(self.lva);
-        return Object{ .obj = obj_ptr.? };
+        return Object{ .obj = obj_ptr orelse return error.LValueAsObject };
     }
 
-    pub fn as_rvalue(self: *Self) RValue {
+    pub fn as_rvalue(self: *Self) !RValue {
         const rva_ptr = c.gcc_jit_lvalue_as_rvalue(self.lva);
-        return RValue{ .rva = rva_ptr.? };
+        return RValue{ .rva = rva_ptr orelse return error.LValueAsRValue };
     }
 
     pub fn set_alignment(self: *Self, bytes: c_uint) void {
@@ -853,14 +851,14 @@ pub const LValue = struct {
         return c.gcc_jit_lvalue_get_alignment(self.lva);
     }
 
-    pub fn access_field(self: *Self, location: Location, field: Field) LValue {
+    pub fn access_field(self: *Self, location: Location, field: Field) !LValue {
         const lva_ptr = c.gcc_jit_lvalue_access_field(self.lva, location.loc, field.fie);
-        return LValue{ .lva = lva_ptr.? };
+        return LValue{ .lva = lva_ptr orelse return error.AccessField };
     }
 
-    pub fn get_address(self: *Self, location: Location) RValue {
+    pub fn get_address(self: *Self, location: Location) !RValue {
         const rva_ptr = c.gcc_jit_lvalue_get_address(self.lva, location.loc);
-        return RValue{ .rva = rva_ptr.? };
+        return RValue{ .rva = rva_ptr orelse return error.GetAddress };
     }
 
     pub fn set_tls_model(self: *Self, model: ThredLocalStorageModel) void {
@@ -884,22 +882,21 @@ pub const Parameter = struct {
 
     const Self = @This();
 
-    pub fn as_object(self: *Self) Object {
+    pub fn as_object(self: *Self) !Object {
         const obj_ptr = c.gcc_jit_param_as_object(self.prm);
 
-        return Object{ .obj = obj_ptr.? };
+        return Object{ .obj = obj_ptr orelse return error.ParameterAsObject };
     }
 
-    pub fn as_lvalue(self: *Self) LValue {
+    pub fn as_lvalue(self: *Self) !LValue {
         const lva_ptr = c.gcc_jit_param_as_lvalue(self.prm);
 
-        return LValue{ .lva = lva_ptr.? };
+        return LValue{ .lva = lva_ptr orelse return error.ParameterAsLValue };
     }
 
-    pub fn as_rvalue(self: *Self) RValue {
+    pub fn as_rvalue(self: *Self) !RValue {
         const rva_ptr = c.gcc_jit_param_as_rvalue(self.prm);
-
-        return RValue{ .rva = rva_ptr.? };
+        return RValue{ .rva = rva_ptr orelse return error.ParameterAsRValue };
     }
 };
 
@@ -939,10 +936,10 @@ pub const Case = packed struct {
 
     const Self = @This();
 
-    pub fn as_object(self: *Self) Object {
+    pub fn as_object(self: *Self) !Object {
         comptime assert(@hasDecl(c, "LIBGCCJIT_HAVE_SWITCH_STATEMENTS"));
         const obj_ptr = c.gcc_jit_case_as_object(self.cas);
-        return Object{ .obj = obj_ptr.? };
+        return Object{ .obj = obj_ptr orelse return error.CaseAsObject };
     }
 };
 
@@ -951,10 +948,10 @@ pub const Timer = struct {
 
     const Self = @This();
 
-    pub fn init() Self {
+    pub fn init() !Self {
         comptime assert(@hasDecl(c, "LIBGCCJIT_HAVE_TIMING_API"));
         const timer_ptr = c.gcc_jit_timer_new();
-        return Self{ .tmr = timer_ptr.? };
+        return Self{ .tmr = timer_ptr orelse return error.CreateTimer };
     }
 
     pub fn deinit(self: *Self) void {
@@ -964,7 +961,6 @@ pub const Timer = struct {
 
     pub fn push(self: *Self, item_name: [:0]const u8) void {
         comptime assert(@hasDecl(c, "LIBGCCJIT_HAVE_TIMING_API"));
-
         c.gcc_jit_timer_push(self.tmr, item_name);
     }
 
@@ -999,10 +995,10 @@ pub const ExtendedAssembly = struct {
 
     const Self = @This();
 
-    pub fn as_object(self: *Self) Object {
+    pub fn as_object(self: *Self) !Object {
         comptime assert(@hasDecl(c, "LIBGCCJIT_HAVE_ASM_STATEMENTS"));
         const obj_ptr = c.gcc_jit_extended_asm_as_object(self.amb);
-        return Object{ .obj = obj_ptr.? };
+        return Object{ .obj = obj_ptr orelse return error.ExtendedAssemblyAsObject };
     }
 
     pub fn set_volatile_flag(self: *Self, flag: bool) void {
